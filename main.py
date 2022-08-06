@@ -3,25 +3,20 @@ import telebot
 import requests
 from datetime import datetime
 from dotenv import load_dotenv
+from collections.abc import Callable
 
 load_dotenv()
 
 WEATHER_API_TOKEN = os.getenv('WEATHER_API_TOKEN')
 BOT_API_TOKEN = os.getenv('BOT_API_TOKEN')
 bot = telebot.TeleBot(BOT_API_TOKEN)
-weather_parameters = {
-    'key': WEATHER_API_TOKEN,
-    'place_id': 'berdychiv',
-}
 crypto_headers = {
     'accept': 'application/json',
 }
 
 crypto_url = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd'
 privatbank_url = f"https://api.privatbank.ua/p24api/exchange_rates?json&date={datetime.now().strftime('%d.%m.%Y')}"
-weather_url = 'https://www.meteosource.com/api/v1/free/point'
 privatbank_data = requests.get(privatbank_url).json()
-weather_data = requests.get(weather_url, params=weather_parameters).json()
 cryptocurrency_data = requests.get(crypto_url, headers=crypto_headers).json()
 cryptocurrency_list = [cryptocurrency for cryptocurrency in cryptocurrency_data]
 country_codes = {
@@ -29,6 +24,11 @@ country_codes = {
     'PL': '🇵🇱',
     'EU': '🇪🇺',
 }
+print(u'\U0001F300')
+
+
+class CityDoesNotExist(Exception):
+    pass
 
 
 def which_season(current_month: int) -> str:
@@ -43,6 +43,52 @@ def which_season(current_month: int) -> str:
             return '🍁'
 
 
+def get_city_weather_data(city: str = 'Berdychiv') -> tuple:
+    weather_url = 'https://www.meteosource.com/api/v1/free/point'
+    weather_parameters = {
+        'key': WEATHER_API_TOKEN,
+        'place_id': city.lower(),
+    }
+
+    weather_data = requests.get(weather_url, params=weather_parameters).json()
+
+    return weather_data, city
+
+
+def get_weather(data: Callable[[str], tuple]) -> str:
+    try:
+        current_weather_data = data[0]['current']
+        city = data[1]
+    except KeyError:
+        raise CityDoesNotExist
+    else:
+        return (
+            f"City: {city}\n"
+            f"Temperature: {current_weather_data['temperature']}\n"
+            f"Summary: {current_weather_data['summary']}\n"
+            f"Wind: (Speed: {current_weather_data['wind']['speed']}, Angle: {current_weather_data['wind']['angle']})\n"
+            f"Cloud cover: {current_weather_data['cloud_cover']}\n"
+        )
+
+
+def get_weather_to_the_same_day(data: Callable[[str], tuple]) -> str:
+    text = ''
+    weather_data = data[0]
+    city = data[1]
+
+    for hourly_weather_data in weather_data['hourly']['data']:
+        text += (
+            f"City: {city}\n"
+            f"Time: {hourly_weather_data['date']}\n"
+            f"Temperature: {hourly_weather_data['temperature']}\n"
+            f"Summary: {hourly_weather_data['summary']}\n"
+            f"Wind: (Speed: {hourly_weather_data['wind']['speed']}, Angle: {hourly_weather_data['wind']['angle']})\n"
+            f"Cloud cover: {hourly_weather_data['cloud_cover']}\n\n"
+        )
+
+    return text
+
+
 def main_menu_markup() -> telebot.types.ReplyKeyboardMarkup:
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     weather = telebot.types.KeyboardButton(f'{which_season(datetime.now().month)} Weather')
@@ -50,32 +96,90 @@ def main_menu_markup() -> telebot.types.ReplyKeyboardMarkup:
     cryptocurrency = telebot.types.KeyboardButton('💸 Cryptocurrency')
 
     markup.add(weather, currency, cryptocurrency)
+
     return markup
+
+
+def get_city_weather(message: telebot.types.Message) -> None:
+    try:
+        weather_data = get_city_weather_data(message.text)
+        text = get_weather(weather_data)
+    except CityDoesNotExist:
+        bot.send_message(message.chat.id, 'This city does not exist. Please enter an existing one.')
+    else:
+        bot.send_message(message.chat.id, text)
+
+
+def cryptocurrency_convert(message: telebot.types.Message, cryptocurrency: tuple) -> None:
+    try:
+        result = float(message.text) * cryptocurrency[0]['current_price']
+        text = (
+            cryptocurrency[0]['image'],
+            f"{cryptocurrency[0]['symbol'].upper()}: {result:.2f}$"
+        )
+
+        bot.send_photo(message.chat.id, photo=text[0], caption=text[1])
+    except ValueError:
+        bot.send_message(
+            message.chat.id, 'You have entered an incorrect value for currency conversion. Please enter the correct value!'
+        )
+
+
+def currency_convert(message: telebot.types.Message, currency: float, country_code: str) -> None:
+    try:
+        result = float(message.text) * currency
+
+        bot.send_message(message.chat.id, f'{country_code} {result:.2f}')
+    except ValueError:
+        bot.send_message(
+            message.chat.id, 'You have entered an incorrect value for currency conversion. Please enter the correct value!'
+        )
 
 
 @bot.message_handler(commands=['start'])
 def user_greetings(message: telebot.types.Message) -> None:
     user = message.from_user
     text = f'Greetings, @{user.username}.'
-
     bot.delete_message(message.chat.id, message.message_id)
     bot.send_message(message.chat.id, text, reply_markup=main_menu_markup())
+
+
+@bot.message_handler(commands=['location'])
+def location(message: telebot.types.Message) -> None:
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+    current_location = telebot.types.KeyboardButton('Location', request_location=True)
+
+    markup.add(current_location)
+    bot.send_message(message.chat.id, f'Take location {message.location}', reply_markup=markup)
+
+
+@bot.message_handler(content_types=['location'])
+def get_location(message: telebot.types.Message) -> None:
+    bot.delete_message(message.chat.id, message.id)
+    print(message.id)
+    print(message.location)
 
 
 @bot.message_handler(content_types=['text'])
 def bot_message(message: telebot.types.Message) -> None:
     if message.text == f'{which_season(datetime.now().month)} Weather':
-        text = f"Now in Berdychiv temperature is {weather_data['current']['temperature']}"
+        markup = telebot.types.InlineKeyboardMarkup()
+        text = 'Use one of three button below'
+        current_weather = telebot.types.InlineKeyboardButton(text='Current weather', callback_data='current_weather')
+        city_weather = telebot.types.InlineKeyboardButton(text='Type the city which you wanna see', callback_data='city_weather')
+        all_weather = telebot.types.InlineKeyboardButton(text='Display all weather from current to next day at the same time', callback_data='all_weather')
 
+        markup.row_width = 1
+        markup.add(current_weather, city_weather, all_weather)
         bot.delete_message(message.chat.id, message.message_id)
-        bot.send_message(message.chat.id, text)
+        bot.send_message(message.chat.id, text, reply_markup=markup)
     elif message.text == '💵 Currency':
         markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
         text = 'You can only convert USD/EUR/PLN currency into UAH or see the purchase rate of the National Bank of Ukraine'
         available_currency = telebot.types.KeyboardButton('💰 All available currency')
         dollar = telebot.types.KeyboardButton(f"{country_codes['US']} Dollar")
         euro = telebot.types.KeyboardButton(f"{country_codes['EU']} Euro")
-        zloty = telebot.types.KeyboardButton(F"{country_codes['PL']} Zloty")
+        zloty = telebot.types.KeyboardButton(f"{country_codes['PL']} Zloty")
         previous = telebot.types.KeyboardButton('🔙 Go to the main menu')
 
         markup.add(available_currency, dollar, euro, zloty, previous)
@@ -138,30 +242,20 @@ def bot_message(message: telebot.types.Message) -> None:
         bot.register_next_step_handler(text, cryptocurrency_convert, data)
 
 
-def currency_convert(message: telebot.types.Message, currency: float, country_code: str) -> None:
-    try:
-        result = float(message.text) * currency
+@bot.callback_query_handler(func=lambda call: True)
+def weather_variant(call: telebot.types.CallbackQuery) -> None:
+    if call.data == 'current_weather':
+        text = get_weather(get_city_weather_data())
 
-        bot.send_message(message.chat.id, f'{country_code} {result:.2f}')
-    except ValueError:
-        bot.send_message(
-            message.chat.id, 'You have entered an incorrect value for currency conversion. Please enter the correct value!'
-        )
+        bot.send_message(call.message.chat.id, text)
+    elif call.data == 'city_weather':
+        text = bot.send_message(call.message.chat.id, 'Enter the city')
 
+        bot.register_next_step_handler(text, get_city_weather)
+    elif call.data == 'all_weather':
+        text = get_weather_to_the_same_day(get_city_weather_data())
 
-def cryptocurrency_convert(message: telebot.types.Message, cryptocurrency: tuple) -> None:
-    try:
-        result = float(message.text) * cryptocurrency[0]['current_price']
-        text = (
-            cryptocurrency[0]['image'],
-            f"{cryptocurrency[0]['symbol'].upper()}: {result:.2f}"
-        )
-
-        bot.send_photo(message.chat.id, photo=text[0], caption=text[1])
-    except ValueError:
-        bot.send_message(
-            message.chat.id, 'You have entered an incorrect value for currency conversion. Please enter the correct value!'
-        )
+        bot.send_message(call.message.chat.id, text)
 
 
 bot.infinity_polling()
