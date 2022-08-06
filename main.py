@@ -24,7 +24,6 @@ country_codes = {
     'PL': '🇵🇱',
     'EU': '🇪🇺',
 }
-print(u'\U0001F300')
 
 
 class CityDoesNotExist(Exception):
