@@ -271,7 +271,7 @@ if 'HEROKU' in list(os.environ.keys()):
     @server.route('/')
     def webhook() -> tuple:
         bot.remove_webhook()
-        bot.set_webhook(url='https://helper108ddybot' + BOT_API_TOKEN)
+        bot.set_webhook(url='https://helper108ddybot.herokuapp.com/' + BOT_API_TOKEN)
 
         return '!', 200
 
