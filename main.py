@@ -3,6 +3,7 @@ import telebot
 import requests
 from datetime import datetime
 from dotenv import load_dotenv
+from flask import Flask, request
 from collections.abc import Callable
 
 load_dotenv()
@@ -10,6 +11,7 @@ load_dotenv()
 WEATHER_API_TOKEN = os.getenv('WEATHER_API_TOKEN')
 BOT_API_TOKEN = os.getenv('BOT_API_TOKEN')
 bot = telebot.TeleBot(BOT_API_TOKEN)
+server = Flask(__name__)
 crypto_headers = {
     'accept': 'application/json',
 }
@@ -257,4 +259,23 @@ def weather_variant(call: telebot.types.CallbackQuery) -> None:
         bot.send_message(call.message.chat.id, text)
 
 
-bot.infinity_polling()
+if 'HEROKU' in list(os.environ.keys()):
+    @server.route('/' + BOT_API_TOKEN, methods=['POST'])
+    def get_message() -> tuple:
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_update([update])
+
+        return '!', 200
+
+    @server.route('/')
+    def webhook() -> tuple:
+        bot.remove_webhook()
+        bot.set_webhook(url='https://helper108ddybot' + BOT_API_TOKEN)
+
+        return '!', 200
+
+    server.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
+else:
+    bot.remove_webhook()
+    bot.infinity_polling()
