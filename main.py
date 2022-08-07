@@ -145,22 +145,6 @@ def user_greetings(message: telebot.types.Message) -> None:
     bot.send_message(message.chat.id, text, reply_markup=main_menu_markup())
 
 
-@bot.message_handler(commands=['location'])
-def location(message: telebot.types.Message) -> None:
-    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    current_location = telebot.types.KeyboardButton('Location', request_location=True)
-
-    markup.add(current_location)
-    bot.send_message(message.chat.id, f'Take location {message.location}', reply_markup=markup)
-
-
-@bot.message_handler(content_types=['location'])
-def get_location(message: telebot.types.Message) -> None:
-    bot.delete_message(message.chat.id, message.id)
-    print(message.id)
-    print(message.location)
-
-
 @bot.message_handler(content_types=['text'])
 def bot_message(message: telebot.types.Message) -> None:
     if message.text == f'{which_season(datetime.now().month)} Weather':
@@ -264,16 +248,16 @@ if 'HEROKU' in list(os.environ.keys()):
     def get_message() -> tuple:
         json_string = request.get_data().decode('utf-8')
         update = telebot.types.Update.de_json(json_string)
-        bot.process_new_update([update])
+        bot.process_new_updates([update])
 
-        return '!', 200
+        return 'It\'s work', 200
 
     @server.route('/')
     def webhook() -> tuple:
         bot.remove_webhook()
         bot.set_webhook(url='https://helper108ddybot.herokuapp.com/' + BOT_API_TOKEN)
 
-        return '!', 200
+        return 'Bot greets you', 200
 
     server.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
 else:
